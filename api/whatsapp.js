@@ -45,7 +45,8 @@ function isKidsTopic(text) {
 }
 
 function isRentalTopic(text) {
-  return /租場|檔期|有冇位|room a|room b|\bab\b|貓頭鷹|鎖場|包場/.test((text || '').toLowerCase());
+  const t = (text || '').toLowerCase();
+  return /租場|檔期|有冇位|有位|room\s*a|room\s*b|a\s*\+\s*b|\bab\b|貓頭鷹|鎖場|包場|\d{1,2}\s*[-/]\s*\d{1,2}/.test(t);
 }
 
 async function replyText(to, body) {
@@ -66,29 +67,90 @@ function addDays(iso, n) {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
+function pad(n) { return String(n).padStart(2, '0'); }
+function toMin(hhmm) {
+  const [h, m] = String(hhmm).slice(0, 5).split(':').map(Number);
+  return h * 60 + m;
+}
+function fromMin(n) {
+  const x = ((n % (24 * 60)) + 24 * 60) % (24 * 60);
+  return `${pad(Math.floor(x / 60))}:${pad(x % 60)}`;
+}
+
 function parseRoom(text) {
   const t = text.toLowerCase();
-  if (/\bab\b|a\s*\+\s*b|a同b|a及b|兩房/.test(t)) return 'AB';
-  if (/\broom\s*b\b|b房/.test(t)) return 'B';
-  if (/\broom\s*a\b|a房/.test(t)) return 'A';
+  if (/a\s*\+\s*b|a\s*&\s*b|room\s*ab|\bab\b|a同b|a及b|兩房|合併/.test(t)) return 'AB';
+  if (/room\s*b|b房/.test(t)) return 'B';
+  if (/room\s*a|a房/.test(t)) return 'A';
   return '';
 }
+
 function parseDate(text) {
-  const t = text.replace(/\s+/g, '');
-  const iso = t.match(/(20\d{2})[-/\u5e74](\d{1,2})[-/\u6708](\d{1,2})/);
-  if (iso) return `${iso[1]}-${String(iso[2]).padStart(2, '0')}-${String(iso[3]).padStart(2, '0')}`;
+  const raw = text || '';
+  const t = raw.replace(/\s+/g, '');
+  const iso = t.match(/(20\d{2})[-\/.\u5e74](\d{1,2})[-\/.\u6708](\d{1,2})/);
+  if (iso) return `${iso[1]}-${pad(iso[2])}-${pad(iso[3])}`;
   const md = t.match(/(\d{1,2})月(\d{1,2})/);
-  if (md) return `${hkToday().slice(0, 4)}-${String(md[1]).padStart(2, '0')}-${String(md[2]).padStart(2, '0')}`;
+  if (md) return `${hkToday().slice(0, 4)}-${pad(md[1])}-${pad(md[2])}`;
+  const slash = raw.match(/\b(\d{1,2})\s*[\/\-.]\s*(\d{1,2})(?:\s*[\/\-.]\s*(20\d{2}))?\b/);
+  if (slash) {
+    let a = Number(slash[1]);
+    let b = Number(slash[2]);
+    const y = slash[3] || hkToday().slice(0, 4);
+    let month; let day;
+    if (a > 12 && b <= 12) { day = a; month = b; }
+    else if (b > 12 && a <= 12) { month = a; day = b; }
+    else { day = a; month = b; }
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${y}-${pad(month)}-${pad(day)}`;
+    }
+  }
   if (/後日|后天/.test(t)) return addDays(hkToday(), 2);
   if (/聽日|听日|明日|明天/.test(t)) return addDays(hkToday(), 1);
+  if (/今晚|今日|今天/.test(t)) return hkToday();
   return hkToday();
 }
-function wantsAvailability(text) {
-  return /檔期|档期|有冇位|空檔|今晚|聽日|听日|後日/.test(text);
+
+function parseHourToken(tok, pmHint) {
+  const m = String(tok).toLowerCase().match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  if (!m) return null;
+  let h = Number(m[1]);
+  const min = Number(m[2] || 0);
+  const mer = m[3] || (pmHint ? 'pm' : '');
+  if (mer === 'pm' && h < 12) h += 12;
+  if (mer === 'am' && h === 12) h = 0;
+  if (!mer && h <= 10 && pmHint) h += 12;
+  return h * 60 + min;
 }
-function formatSlots(room) {
-  const free = (room.slots || []).filter((s) => s.status === 'available');
-  if (!free.length) return `${room.room}：當日無空檔`;
+
+function parseTimeRange(text) {
+  const t = text.toLowerCase().replace(/點/g, ':');
+  const pm = /pm\b|晚/.test(t);
+  const range = t.match(/(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*[-~至到]到?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/);
+  if (!range) return null;
+  const start = parseHourToken(range[1], pm || /pm/.test(range[2]));
+  const end = parseHourToken(range[2], pm);
+  if (start == null || end == null || end <= start) return null;
+  return { start: fromMin(start), end: fromMin(end) };
+}
+
+function wantsAvailability(text) {
+  return /檔期|档期|有冇位|有位|空檔|今晚|聽日|听日|後日|available|free|room\s*a|a\s*\+\s*b/.test((text || '').toLowerCase());
+}
+
+function formatSlots(room, window) {
+  let slots = room.slots || [];
+  if (window) {
+    const a = toMin(window.start);
+    const b = toMin(window.end);
+    slots = slots.filter((s) => toMin(s.start) < b && toMin(s.end) > a);
+  }
+  const free = slots.filter((s) => s.status === 'available');
+  if (!slots.length) return `${room.room}：無此時段`;
+  if (window && free.length === slots.length) {
+    return `${room.room}：${window.start}–${window.end} 有位`;
+  }
+  if (!free.length) return `${room.room}：${window ? `${window.start}–${window.end} 已滿` : '當日無空檔'}`;
   const groups = [];
   let cur = { start: free[0].start, end: free[0].end };
   for (let i = 1; i < free.length; i += 1) {
@@ -96,11 +158,15 @@ function formatSlots(room) {
     else { groups.push(cur); cur = { start: free[i].start, end: free[i].end }; }
   }
   groups.push(cur);
-  return `${room.room}：` + groups.slice(0, 8).map((g) => `${g.start}–${g.end}`).join('、');
+  const shown = groups.slice(0, 8).map((g) => `${g.start}–${g.end}`).join('、');
+  if (window) return `${room.room}：${window.start}–${window.end} 未全段可用；空檔 ${shown}`;
+  return `${room.room}：${shown}`;
 }
+
 async function lookupAvailability(text) {
   const date = parseDate(text);
   const room = parseRoom(text);
+  const window = parseTimeRange(text);
   const qs = new URLSearchParams({ date });
   if (room) qs.set('room', room);
   const res = await fetch(`${AVAIL_API}?${qs}`, { signal: AbortSignal.timeout(6000) });
@@ -108,7 +174,10 @@ async function lookupAvailability(text) {
   const data = await res.json();
   const rooms = data.rooms || [];
   if (!rooms.length) return `${date} 揀唔到房間。https://roof70s.com/`;
-  return [`Roof70's ${date} 空檔`, ...rooms.map(formatSlots), '鎖場請上 https://roof70s.com/'].join('\n');
+  const title = window
+    ? `Roof70's ${date} ${window.start}–${window.end}${room ? ` ${room}` : ''}`
+    : `Roof70's ${date} 空檔`;
+  return [title, ...rooms.map((r) => formatSlots(r, window)), '鎖場請上 https://roof70s.com/'].join('\n');
 }
 
 async function answer(text) {
@@ -124,7 +193,9 @@ async function answer(text) {
   if (/鎖場|幫我租|落單|hold位/.test(t) && !wantsAvailability(text)) {
     return 'WhatsApp 唔代鎖場。https://roof70s.com/';
   }
-  if (wantsAvailability(text) || /有冇位|檔期/.test(text)) return lookupAvailability(text);
+  if (wantsAvailability(text) || /有冇位|有位|檔期|room\s*a|a\s*\+\s*b/.test(t)) {
+    return lookupAvailability(text);
+  }
   if (/幾錢|價錢|price|費用|幾貴|貓頭鷹|owl/.test(t)) {
     return [
       "Roof70's 租場（HKD／小時）",
