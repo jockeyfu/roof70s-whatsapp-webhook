@@ -1,3 +1,6 @@
 {
-  "rewrites": [{ "source": "/webhook/whatsapp", "destination": "/api/whatsapp" }]
+  "rewrites": [{ "source": "/webhook/whatsapp", "destination": "/api/whatsapp" }],
+  "functions": {
+    "api/whatsapp.js": { "maxDuration": 20 }
+  }
 }
