@@ -6,11 +6,15 @@ const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
 const AVAIL_API = process.env.AVAILABILITY_API || 'https://roof70s.com/api/availability';
 const FAQ_API = process.env.FAQ_API || 'https://roof70s.com/api/whatsapp-faq';
 const GRAPH = `https://graph.facebook.com/v21.0/${PHONE_ID}/messages`;
-const AVAIL_RE = /檔期|档期|有冇位|有無位|有位嗎|有位嗎|有位|空檔|空房|空位|有冇房|有無房|有房嗎|有冇得租|有無得租|可唔可以租|租唔租到|得唔得租|今晚|聽日|听日|後日|available|free|room\s*a|a\s*\+\s*b/;
+const AVAIL_RE = /檔期|档期|有冇位|有無位|有位嗎|有位|空檔|空房|空位|有冇房|有無房|有房嗎|有冇得租|有無得租|可唔可以租|租唔租到|得唔得租|今晚|聽日|听日|後日|available|free|room\s*a|a\s*\+\s*b/;
+const PRICE_RE = /幾錢|幾多錢|價錢|price|費用|幾貴|價目/;
+const pending = new Map();
 
 const KIDS_FORM = ['Hello 家長你好！🥰','家長可以填寫返以下嘅資料先！😊','','小朋友姓名：','歲數：','性別：M / F','跳舞經驗：Yes / No','（如有可附上影片作參考）','家長聯絡電話（WhatsApp✅）：','*所有資料保密只作學校內部參考','','我哋會有專業嘅導師團隊為你睇返最適合小朋友歲數以及程度的課程！❤️','推薦返俺小朋友嚟試堂嫁！😊'].join('\n');
 const KIDS_AFTER_FORM = '收到，多謝家長！我哋同事會盡快覆返你。如要轉即時人手可打「staff」。';
 const LEAVE_REPLY = ['家長你好，請假要職員代辦，獲准先退 1 堂。課堂開始後唔退。','請回覆：小朋友姓名、邊一堂／幾時、原因（唔舒服／學校有事）。','同事會盡快跟。緊急可打「staff」。'].join('\n');
+const KIDS_PRICE = ['Rookids Price list','','試堂','首次試堂  $120','第二次試堂  $200','','套票','四堂（35天有效）  $980（每堂$245）','八堂（70天有效）  $1780（每堂$222）','十二堂（105天有效）  $2380（每堂$198）','個人特訓套票二十四堂（126天有效）  $3800（每堂$158）','家庭套票二十四堂（105天有效）  $4000（每堂$166）','','其他','單堂  $250'].join('\n');
+const RENTAL_PRICE = ["Roof70's 租場（HKD／小時）",'A  非繁忙 280 · 繁忙 420 · 貓頭鷹 800','B  非繁忙 220 · 繁忙 330 · 貓頭鷹 800','AB 非繁忙 480 · 繁忙 680 · 貓頭鷹 1500','繁忙：平日 18:00 後，週末全日'].join('\n');
 
 let kbCache = { at: 0, items: [] };
 async function loadKb() {
@@ -52,6 +56,9 @@ function isKidsTopic(text) {
 }
 function isRentalTopic(text) {
   return AVAIL_RE.test((text || '').toLowerCase()) || /租場|貓頭鷹|鎖場|包場|room\s*[ab]|\d{1,2}\s*[-/]\s*\d{1,2}/.test((text || '').toLowerCase());
+}
+function wantsKidsPrice(text) {
+  return /兒童|課程|試堂|套票|rookids|kids|街舞班/.test(text || '');
 }
 async function replyText(to, body) {
   if (!TOKEN || !PHONE_ID) return;
@@ -168,7 +175,7 @@ async function lookupAvailability(text, items) {
   const footer = slotOf(items, 'availability_footer', '鎖場請上 https://roof70s.com/');
   return [title, ...rooms.map((r) => formatSlots(r, window)), footer].join('\n');
 }
-async function answer(text) {
+async function answer(text, from) {
   const items = await loadKb();
   const t = (text || '').toLowerCase();
   if (/staff|改期|退款|投訴|平少少|折扣|報價|排演/.test(t)) {
@@ -176,6 +183,19 @@ async function answer(text) {
   }
   if (isLeaveTopic(text)) return matchFaq(text, 'kids', items) || slotOf(items, 'leave', LEAVE_REPLY);
   if (looksLikeKidsForm(text)) return slotOf(items, 'kids_after_form', KIDS_AFTER_FORM);
+  if (from && pending.get(from) === 'price_kind') {
+    pending.delete(from);
+    if (/租/.test(t) && !wantsKidsPrice(text)) return slotOf(items, 'rental_price', RENTAL_PRICE);
+    if (wantsKidsPrice(text) || /兒童|課程/.test(t)) return slotOf(items, 'kids_price', KIDS_PRICE);
+  }
+  if (PRICE_RE.test(t) || /貓頭鷹|owl/.test(t)) {
+    if (wantsKidsPrice(text)) return slotOf(items, 'kids_price', KIDS_PRICE);
+    if (isRentalTopic(text) || /貓頭鷹|owl|租場/.test(t)) return slotOf(items, 'rental_price', RENTAL_PRICE);
+    if (PRICE_RE.test(t)) {
+      if (from) pending.set(from, 'price_kind');
+      return slotOf(items, 'price_ask', '你係想查詢租場費用，定係兒童班課程價錢？請回覆「租場」或「兒童班」。');
+    }
+  }
   if (isKidsTopic(text) && !isRentalTopic(text)) {
     const form = slotOf(items, 'kids_form', KIDS_FORM);
     const extra = matchFaq(text, 'kids', items);
@@ -186,9 +206,6 @@ async function answer(text) {
   }
   if (wantsAvailability(text) || AVAIL_RE.test(t)) {
     return lookupAvailability(text, items);
-  }
-  if (/幾錢|價錢|price|費用|幾貴|貓頭鷹|owl/.test(t)) {
-    return slotOf(items, 'rental_price', ["Roof70's 租場（HKD／小時）",'A  非繁忙 280 · 繁忙 420 · 貓頭鷹 800','B  非繁忙 220 · 繁忙 330 · 貓頭鷹 800','AB 非繁忙 480 · 繁忙 680 · 貓頭鷹 1500','繁忙：平日 18:00 後，週末全日'].join('\n'));
   }
   if (/點去|地址|位置|where|address/.test(t)) return slotOf(items, 'address', '新蒲崗五芳街 23–25 號 The William 6 樓 C。https://roof70s.com/');
   if (/幾點|營業|開門時間/.test(t)) return slotOf(items, 'hours', '大約 10:00–23:00。午夜至早上有貓頭鷹套餐。');
@@ -208,7 +225,7 @@ export default async function handler(req, res) {
     console.log('incoming_count', messages.length);
     for (const msg of messages) {
       if (msg.type !== 'text' || !msg.text?.body || !msg.from) continue;
-      await replyText(msg.from, await answer(msg.text.body));
+      await replyText(msg.from, await answer(msg.text.body, msg.from));
     }
   } catch (err) { console.error(err); }
   res.status(200).json({ ok: true });
