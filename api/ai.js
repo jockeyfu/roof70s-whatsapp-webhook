@@ -24,6 +24,7 @@ export async function aiReply(text, facts, extra = {}) {
     '你用香港粵語回覆，口氣親切、短句。',
     topic === 'rental' ? '呢個對話已確認係租場，唔好再問兒童班定租場。' : '',
     topic === 'kids' ? '呢個對話已確認係兒童班，唔好再問租場定兒童班。' : '',
+    '下星期三、聽日、晚七點等講法系統已換成檔期裡面嘅日期時段。有檔期就直接答有冇位，禁止再問確實日期。',
     '要繼續上面對話，唔好當每句都係新客。',
     '如果資料有「檔期」，必須直接講有冇位、邊房、幾點到幾點。禁止叫人自己上網站查檔期。',
     '網站 https://roof70s.com/ 只用來鎖場落單。',
@@ -38,7 +39,7 @@ export async function aiReply(text, facts, extra = {}) {
     const res = await fetch(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, temperature: 0.3, max_tokens: 500, messages }),
+      body: JSON.stringify({ model, temperature: 0.2, max_tokens: 500, messages }),
       signal: AbortSignal.timeout(12000),
     });
     if (!res.ok) {
