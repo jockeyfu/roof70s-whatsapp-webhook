@@ -10,6 +10,7 @@ const GRAPH = `https://graph.facebook.com/v21.0/${PHONE_ID}/messages`;
 const AVAIL_RE = /檔期|档期|有冇位|有無位|有位嗎|有位|有冇場|有無場|有場|空檔|空房|空位|有冇房|有無房|有房嗎|有冇得租|有無得租|可唔可以租|租唔租到|得唔得租|租場|今晚|聽日|听日|後日|下星期|下週|下周|星期|available|free|room\s*a|a\s*\+\s*b/;
 const PRICE_RE = /幾錢|幾多錢|價錢|price|費用|幾貴|價目/;
 const pending = new Map();
+const sessions = globalThis.__waSess || (globalThis.__waSess = new Map());
 const DOW = { '日': 0, '天': 0, sun: 0, '一': 1, mon: 1, '二': 2, tue: 2, '三': 3, wed: 3, '四': 4, thu: 4, '五': 5, fri: 5, '六': 6, sat: 6 };
 
 const KIDS_FORM = ['Hello 家長你好！🥰','家長可以填寫返以下嘅資料先！😊','','小朋友姓名：','歲數：','性別：M / F','跳舞經驗：Yes / No','（如有可附上影片作參考）','家長聯絡電話（WhatsApp✅）：','*所有資料保密只作學校內部參考','','我哋會有專業嘅導師團隊為你睇返最適合小朋友歲數以及程度的課程！❤️','推薦返俺小朋友嚟試堂嫁！😊'].join('\n');
@@ -18,6 +19,24 @@ const LEAVE_REPLY = ['家長你好，請假要職員代辦，獲准先退 1 堂�
 const KIDS_PRICE = ['Rookids Price list','','試堂','首次試堂  $120','第二次試堂  $200','','套票','四堂（35天有效）  $980（每堂$245）','八堂（70天有效）  $1780（每堂$222）','十二堂（105天有效）  $2380（每堂$198）','個人特訓套票二十四堂（126天有效）  $3800（每堂$158）','家庭套票二十四堂（105天有效）  $4000（每堂$166）','','其他','單堂  $250'].join('\n');
 const RENTAL_PRICE = ["Roof70's 租場（HKD／小時）",'A  非繁忙 280 · 繁忙 420 · 貓頭鷹 800','B  非繁忙 220 · 繁忙 330 · 貓頭鷹 800','AB 非繁忙 480 · 繁忙 680 · 貓頭鷹 1500','繁忙：平日 18:00 後，週末全日'].join('\n');
 const DEFAULT_ADDRESS = '新蒲崗五芳街 23–25 號 The William 6 樓 C。https://roof70s.com/';
+
+function getSess(from) {
+  if (!from) return { topic: '', turns: [], at: Date.now() };
+  let s = sessions.get(from);
+  if (!s || Date.now() - s.at > 45 * 60 * 1000) s = { topic: '', turns: [], at: Date.now() };
+  s.at = Date.now();
+  sessions.set(from, s);
+  return s;
+}
+function remember(sess, text) {
+  if (isLeaveTopic(text)) sess.topic = 'leave';
+  else if (isKidsTopic(text) && !isRentalTopic(text) && !wantsAvailability(text)) sess.topic = 'kids';
+  else if (isRentalTopic(text) || wantsAvailability(text) || /租場|場地|場租/.test(text || '')) sess.topic = 'rental';
+}
+function pushTurn(sess, role, content) {
+  sess.turns.push({ role, content: String(content || '').slice(0, 800) });
+  sess.turns = sess.turns.slice(-8);
+}
 
 let kbCache = { at: 0, items: [] };
 async function loadKb() {
@@ -115,8 +134,7 @@ function todayDow() {
 function dateForDow(target, nextWeek) {
   const now = todayDow();
   let add = (target - now + 7) % 7;
-  if (nextWeek) add = add === 0 ? 7 : add + (now === 0 ? 0 : 0);
-  if (nextWeek && add < 7 && now !== 0) {
+  if (nextWeek) {
     const thisMonOffset = (1 - now + 7) % 7;
     const nextMon = thisMonOffset === 0 ? 7 : thisMonOffset;
     add = nextMon + ((target + 6) % 7);
@@ -168,7 +186,6 @@ function parseHourToken(tok, pmHint) {
   if (mer === 'pm' && h < 12) h += 12;
   if (mer === 'am' && h === 12) h = 0;
   if (!mer && h <= 10 && pmHint) h += 12;
-  if (!mer && h === 7 && pmHint) h = 19;
   return h * 60 + min;
 }
 function parseTimeRange(text) {
@@ -231,8 +248,9 @@ async function lookupAvailability(text, items) {
   const footer = slotOf(items, 'availability_footer', '要鎖場先可上 https://roof70s.com/ 落單。');
   return [title, ...rooms.map((r) => formatSlots(r, window)), footer].join('\n');
 }
-async function ruleAnswer(text, from, items) {
+async function ruleAnswer(text, from, items, sess) {
   const t = (text || '').toLowerCase();
+  const topic = sess?.topic || '';
   if (/改期|退款|投訴|平少少|折扣|報價|排演/.test(t)) {
     return slotOf(items, 'staff', '呢單要人手跟。正式客服 96171444。');
   }
@@ -244,14 +262,21 @@ async function ruleAnswer(text, from, items) {
     if (wantsKidsPrice(text) || /兒童|課程|班/.test(t)) return slotOf(items, 'kids_price', KIDS_PRICE);
   }
   if (PRICE_RE.test(t) || /貓頭鷹|owl/.test(t)) {
-    if (wantsKidsPrice(text)) return slotOf(items, 'kids_price', KIDS_PRICE);
-    if (isRentalTopic(text) || /貓頭鷹|owl|租場|場地|場租/.test(t)) return slotOf(items, 'rental_price', RENTAL_PRICE);
+    if (topic === 'kids' || wantsKidsPrice(text)) return slotOf(items, 'kids_price', KIDS_PRICE);
+    if (topic === 'rental' || isRentalTopic(text) || /貓頭鷹|owl|租場|場地|場租/.test(t)) {
+      return slotOf(items, 'rental_price', RENTAL_PRICE);
+    }
     if (PRICE_RE.test(t)) {
       if (from) pending.set(from, 'price_kind');
       return slotOf(items, 'price_ask', '你係想查詢租場費用，定係兒童班課程價錢？請回覆「租場」或「兒童班」。');
     }
   }
-  if (isKidsTopic(text) && !isRentalTopic(text)) {
+  if (topic === 'kids' && isKidsTopic(text) && !isRentalTopic(text)) {
+    const form = slotOf(items, 'kids_form', KIDS_FORM);
+    const extra = matchFaq(text, 'kids', items);
+    return extra ? `${form}\n\n${extra}` : form;
+  }
+  if (isKidsTopic(text) && !isRentalTopic(text) && topic !== 'rental') {
     const form = slotOf(items, 'kids_form', KIDS_FORM);
     const extra = matchFaq(text, 'kids', items);
     return extra ? `${form}\n\n${extra}` : form;
@@ -259,8 +284,8 @@ async function ruleAnswer(text, from, items) {
   if (/鎖場|幫我租|落單|hold位/.test(t) && !wantsAvailability(text)) {
     return '鎖場請上 https://roof70s.com/';
   }
-  if (wantsAvailability(text) || AVAIL_RE.test(t)) {
-    return lookupAvailability(text, items);
+  if (wantsAvailability(text) || AVAIL_RE.test(t) || topic === 'rental') {
+    if (wantsAvailability(text) || AVAIL_RE.test(t)) return lookupAvailability(text, items);
   }
   if (/點去|地址|位置|where|address/.test(t)) return slotOf(items, 'address', DEFAULT_ADDRESS);
   if (/幾點|營業|開門時間/.test(t) && !wantsAvailability(text)) return slotOf(items, 'hours', '大約 10:00–23:00。午夜至早上有貓頭鷹套餐。');
@@ -269,6 +294,8 @@ async function ruleAnswer(text, from, items) {
 async function answer(text, from) {
   const items = await loadKb();
   const t = (text || '').toLowerCase();
+  const sess = getSess(from);
+  remember(sess, text);
   if (/staff/.test(t)) return slotOf(items, 'staff', '呢單要人手跟。正式客服 96171444。');
   if (!inBotHours(slotOf(items, 'bot_hours', ''))) {
     return slotOf(items, 'outside_hours', '');
@@ -278,18 +305,26 @@ async function answer(text, from) {
       '租場價\n' + slotOf(items, 'rental_price', RENTAL_PRICE),
       '兒童班價\n' + slotOf(items, 'kids_price', KIDS_PRICE),
       '地址\n' + slotOf(items, 'address', DEFAULT_ADDRESS),
-    ];
-    if (wantsAvailability(text) || isRentalTopic(text) || /場|租|位|星期|晚/.test(t)) {
+      sess.topic ? `當前題目：${sess.topic}` : '',
+    ].filter(Boolean);
+    if (sess.topic === 'rental' || wantsAvailability(text) || isRentalTopic(text) || /場|租|位|星期|晚/.test(t)) {
       facts.push('檔期\n' + await lookupAvailability(text, items));
     }
     if (isLeaveTopic(text)) facts.push('請假\n' + slotOf(items, 'leave', LEAVE_REPLY));
-    if (isKidsTopic(text) && !PRICE_RE.test(t) && !wantsAvailability(text)) facts.push('新生表\n' + slotOf(items, 'kids_form', KIDS_FORM));
+    if (sess.topic === 'kids' && !PRICE_RE.test(t) && !wantsAvailability(text)) facts.push('新生表\n' + slotOf(items, 'kids_form', KIDS_FORM));
     const faqBits = items.filter((i) => !i.slot && i.answer).slice(0, 20).map((i) => `${i.keywords}: ${i.answer}`).join('\n');
     if (faqBits) facts.push('FAQ\n' + faqBits);
-    const out = await aiReply(text, facts.join('\n\n'));
-    if (out) return out;
+    const out = await aiReply(text, facts.join('\n\n'), { topic: sess.topic, history: sess.turns });
+    if (out) {
+      pushTurn(sess, 'user', text);
+      pushTurn(sess, 'assistant', out);
+      return out;
+    }
   }
-  return ruleAnswer(text, from, items);
+  const reply = await ruleAnswer(text, from, items, sess);
+  pushTurn(sess, 'user', text);
+  pushTurn(sess, 'assistant', reply);
+  return reply;
 }
 export default async function handler(req, res) {
   if (req.method === 'GET') {
