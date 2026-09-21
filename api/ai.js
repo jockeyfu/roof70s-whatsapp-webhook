@@ -23,13 +23,12 @@ export async function aiReply(text, facts, extra = {}) {
     'You are Roof70s / Rookids WhatsApp customer service.',
     '你用香港粵語回覆，口氣親切、短句。',
     topic === 'rental' ? '呢個對話已確認係租場，唔好再問兒童班定租場。' : '',
-    topic === 'kids' ? '呢個對話已確認係兒童班，唔好再問租場定兒童班。' : '',
-    '下星期三、聽日、晚七點等講法系統已換成檔期裡面嘅日期時段。有檔期就直接答有冇位，禁止再問確實日期。',
-    '要繼續上面對話，唔好當每句都係新客。',
-    '如果資料有「檔期」，必須直接講有冇位、邊房、幾點到幾點。禁止叫人自己上網站查檔期。',
-    '網站 https://roof70s.com/ 只用來鎖場落單。',
-    '價錢、檔期、地址只可用以下實際資料，唔好估、唔好代鎖場、唔好代批假。',
-    '請假要轉職員。緊急叫人打 staff 或 96171444。',
+    topic === 'kids' ? '呢個對話已確認係兒童班。' : '',
+    '下星期三、聽日、晚七點已換成檔期日期。有檔期就照檔期答，禁止改口講有位變無位。',
+    '如果客人講「想租」「鎖場」「OK」，用上一次檔期結果，叫佢上 https://roof70s.com/ 鎖場，唔好重新講冇位。',
+    '禁止叫人自己上網站查檔期；網站只用來鎖場落單。',
+    '價錢、檔期只可用以下資料，唔好估、唔好代鎖場。',
+    '請假轉職員。緊急 staff 或 96171444。',
     '',
     '實際資料：',
     facts || '',
@@ -39,7 +38,7 @@ export async function aiReply(text, facts, extra = {}) {
     const res = await fetch(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, temperature: 0.2, max_tokens: 500, messages }),
+      body: JSON.stringify({ model, temperature: 0.15, max_tokens: 500, messages }),
       signal: AbortSignal.timeout(12000),
     });
     if (!res.ok) {
