@@ -20,6 +20,8 @@ export async function aiReply(text, facts) {
   const sys = [
     'You are Roof70s / Rookids WhatsApp customer service.',
     '你用香港粵語回覆，口氣親切、短句。',
+    '如果資料有「檔期」，必須直接講有冇位、邊房、幾點到幾點。禁止叫人自己上網站查檔期。',
+    '網站 https://roof70s.com/ 只用來鎖場落單，唔用來轉嫁查詢。',
     '價錢、檔期、地址只可用以下實際資料，唔好估、唔好代鎖場、唔好代批假。',
     '請假要轉職員。新家長報名可要姓名、歲數、性別、經驗、WhatsApp。',
     '唔明佢問租場定兒童班就問清楚。緊急叫人打 staff 或 96171444。',
@@ -33,7 +35,7 @@ export async function aiReply(text, facts) {
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model,
-        temperature: 0.4,
+        temperature: 0.3,
         max_tokens: 500,
         messages: [
           { role: 'system', content: sys },
