@@ -45,7 +45,7 @@ function isKidsTopic(text) {
 }
 
 function isRentalTopic(text) {
-  return /租場|檔期|有内位|room a|room b|\bab\b|貓頭鷹|鎖場|包場/.test((text || '').toLowerCase());
+  return /租場|檔期|有冇位|room a|room b|\bab\b|貓頭鷹|鎖場|包場/.test((text || '').toLowerCase());
 }
 
 async function replyText(to, body) {
@@ -84,7 +84,7 @@ function parseDate(text) {
   return hkToday();
 }
 function wantsAvailability(text) {
-  return /檔期|档期|有内位|空檔|今晚|聽日|听日|後日/.test(text);
+  return /檔期|档期|有冇位|空檔|今晚|聽日|听日|後日/.test(text);
 }
 function formatSlots(room) {
   const free = (room.slots || []).filter((s) => s.status === 'available');
@@ -124,7 +124,7 @@ async function answer(text) {
   if (/鎖場|幫我租|落單|hold位/.test(t) && !wantsAvailability(text)) {
     return 'WhatsApp 唔代鎖場。https://roof70s.com/';
   }
-  if (wantsAvailability(text) || /有内位|檔期/.test(text)) return lookupAvailability(text);
+  if (wantsAvailability(text) || /有冇位|檔期/.test(text)) return lookupAvailability(text);
   if (/幾錢|價錢|price|費用|幾貴|貓頭鷹|owl/.test(t)) {
     return [
       "Roof70's 租場（HKD／小時）",
@@ -138,7 +138,7 @@ async function answer(text) {
     return '新蒲崗五芳街 23–25 號 The William 6 樓 C。https://roof70s.com/';
   }
   if (/幾點|營業|開門時間/.test(t)) return '大約 10:00–23:00。午夜至早上有貓頭鷹套餐。';
-  return '可以問租場價錢、今晚有内位、兒童班、地址。打「staff」轉人手。';
+  return '可以問租場價錢、今晚有冇位、兒童班、地址。打「staff」轉人手。';
 }
 
 export default async function handler(req, res) {
