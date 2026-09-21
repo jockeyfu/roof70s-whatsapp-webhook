@@ -25,6 +25,12 @@ const KIDS_FORM = [
 const KIDS_AFTER_FORM =
   '收到，多謝家長！我哋同事會盡快覆返你。如要轉即時人手可打「staff」。';
 
+const LEAVE_REPLY = [
+  '家長你好，請假要職員代辦，獲准先退 1 堂。課堂開始後唔退。',
+  '請回覆：小朋友姓名、邊一堂／幾時、原因（唔舒服／學校有事）。',
+  '同事會盡快跟。緊急可打「staff」。',
+].join('\n');
+
 function matchFaq(text, topic) {
   const t = text.toLowerCase();
   const hit = FAQ.find((item) => {
@@ -40,8 +46,12 @@ function looksLikeKidsForm(text) {
   return fields.filter((re) => re.test(raw)).length >= 3;
 }
 
+function isLeaveTopic(text) {
+  return /請假|唔舒服|生病|發燙|感冒|學校有事|缺席|唔得閒上|病假|請早退/.test(text || '');
+}
+
 function isKidsTopic(text) {
-  return /兒童|小朋友|細路|孩子|kids|rookids|boom|街舞班|上堂|套票|幾歲|年齡|請假|報名|試堂|家長/.test(text || '');
+  return /兒童|小朋友|細路|孩子|kids|rookids|boom|街舞班|上堂|套票|幾歲|年齡|報名|試堂|家長/.test(text || '');
 }
 
 function isRentalTopic(text) {
@@ -76,7 +86,6 @@ function fromMin(n) {
   const x = ((n % (24 * 60)) + 24 * 60) % (24 * 60);
   return `${pad(Math.floor(x / 60))}:${pad(x % 60)}`;
 }
-
 function parseRoom(text) {
   const t = text.toLowerCase();
   if (/a\s*\+\s*b|a\s*&\s*b|room\s*ab|\bab\b|a同b|a及b|兩房|合併/.test(t)) return 'AB';
@@ -84,7 +93,6 @@ function parseRoom(text) {
   if (/room\s*a|a房/.test(t)) return 'A';
   return '';
 }
-
 function parseDate(text) {
   const raw = text || '';
   const t = raw.replace(/\s+/g, '');
@@ -101,16 +109,13 @@ function parseDate(text) {
     if (a > 12 && b <= 12) { day = a; month = b; }
     else if (b > 12 && a <= 12) { month = a; day = b; }
     else { day = a; month = b; }
-    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-      return `${y}-${pad(month)}-${pad(day)}`;
-    }
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) return `${y}-${pad(month)}-${pad(day)}`;
   }
   if (/後日|后天/.test(t)) return addDays(hkToday(), 2);
   if (/聽日|听日|明日|明天/.test(t)) return addDays(hkToday(), 1);
   if (/今晚|今日|今天/.test(t)) return hkToday();
   return hkToday();
 }
-
 function parseHourToken(tok, pmHint) {
   const m = String(tok).toLowerCase().match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
   if (!m) return null;
@@ -122,7 +127,6 @@ function parseHourToken(tok, pmHint) {
   if (!mer && h <= 10 && pmHint) h += 12;
   return h * 60 + min;
 }
-
 function parseTimeRange(text) {
   const t = text.toLowerCase().replace(/點/g, ':');
   const pm = /pm\b|晚/.test(t);
@@ -133,11 +137,9 @@ function parseTimeRange(text) {
   if (start == null || end == null || end <= start) return null;
   return { start: fromMin(start), end: fromMin(end) };
 }
-
 function wantsAvailability(text) {
   return /檔期|档期|有冇位|有位|空檔|今晚|聽日|听日|後日|available|free|room\s*a|a\s*\+\s*b/.test((text || '').toLowerCase());
 }
-
 function formatSlots(room, window) {
   let slots = room.slots || [];
   if (window) {
@@ -147,9 +149,7 @@ function formatSlots(room, window) {
   }
   const free = slots.filter((s) => s.status === 'available');
   if (!slots.length) return `${room.room}：無此時段`;
-  if (window && free.length === slots.length) {
-    return `${room.room}：${window.start}–${window.end} 有位`;
-  }
+  if (window && free.length === slots.length) return `${room.room}：${window.start}–${window.end} 有位`;
   if (!free.length) return `${room.room}：${window ? `${window.start}–${window.end} 已滿` : '當日無空檔'}`;
   const groups = [];
   let cur = { start: free[0].start, end: free[0].end };
@@ -162,7 +162,6 @@ function formatSlots(room, window) {
   if (window) return `${room.room}：${window.start}–${window.end} 未全段可用；空檔 ${shown}`;
   return `${room.room}：${shown}`;
 }
-
 async function lookupAvailability(text) {
   const date = parseDate(text);
   const room = parseRoom(text);
@@ -174,9 +173,7 @@ async function lookupAvailability(text) {
   const data = await res.json();
   const rooms = data.rooms || [];
   if (!rooms.length) return `${date} 揀唔到房間。https://roof70s.com/`;
-  const title = window
-    ? `Roof70's ${date} ${window.start}–${window.end}${room ? ` ${room}` : ''}`
-    : `Roof70's ${date} 空檔`;
+  const title = window ? `Roof70's ${date} ${window.start}–${window.end}${room ? ` ${room}` : ''}` : `Roof70's ${date} 空檔`;
   return [title, ...rooms.map((r) => formatSlots(r, window)), '鎖場請上 https://roof70s.com/'].join('\n');
 }
 
@@ -184,6 +181,9 @@ async function answer(text) {
   const t = (text || '').toLowerCase();
   if (/staff|改期|退款|投訴|平少少|折扣|報價|排演/.test(t)) {
     return '呢單要人手跟。正式客服 96171444。';
+  }
+  if (isLeaveTopic(text)) {
+    return matchFaq(text, 'kids') || LEAVE_REPLY;
   }
   if (looksLikeKidsForm(text)) return KIDS_AFTER_FORM;
   if (isKidsTopic(text) && !isRentalTopic(text)) {
