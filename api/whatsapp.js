@@ -1,4 +1,5 @@
 import { FAQ } from './faq.js';
+import { aiEnabled, aiReply } from './ai.js';
 
 const VERIFY = process.env.WHATSAPP_VERIFY_TOKEN || '';
 const TOKEN = process.env.WHATSAPP_TOKEN || '';
@@ -15,6 +16,7 @@ const KIDS_AFTER_FORM = '收到，多謝家長！我哋同事會盡快覆返你�
 const LEAVE_REPLY = ['家長你好，請假要職員代辦，獲准先退 1 堂。課堂開始後唔退。','請回覆：小朋友姓名、邊一堂／幾時、原因（唔舒服／學校有事）。','同事會盡快跟。緊急可打「staff」。'].join('\n');
 const KIDS_PRICE = ['Rookids Price list','','試堂','首次試堂  $120','第二次試堂  $200','','套票','四堂（35天有效）  $980（每堂$245）','八堂（70天有效）  $1780（每堂$222）','十二堂（105天有效）  $2380（每堂$198）','個人特訓套票二十四堂（126天有效）  $3800（每堂$158）','家庭套票二十四堂（105天有效）  $4000（每堂$166）','','其他','單堂  $250'].join('\n');
 const RENTAL_PRICE = ["Roof70's 租場（HKD／小時）",'A  非繁忙 280 · 繁忙 420 · 貓頭鷹 800','B  非繁忙 220 · 繁忙 330 · 貓頭鷹 800','AB 非繁忙 480 · 繁忙 680 · 貓頭鷹 1500','繁忙：平日 18:00 後，週末全日'].join('\n');
+const DEFAULT_ADDRESS = '新蒲崗五芳街 23–25 號 The William 6 樓 C。https://roof70s.com/';
 
 let kbCache = { at: 0, items: [] };
 async function loadKb() {
@@ -194,13 +196,8 @@ async function lookupAvailability(text, items) {
   const footer = slotOf(items, 'availability_footer', '鎖場請上 https://roof70s.com/');
   return [title, ...rooms.map((r) => formatSlots(r, window)), footer].join('\n');
 }
-async function answer(text, from) {
-  const items = await loadKb();
+async function ruleAnswer(text, from, items) {
   const t = (text || '').toLowerCase();
-  if (/staff/.test(t)) return slotOf(items, 'staff', '呢單要人手跟。正式客服 96171444。');
-  if (!inBotHours(slotOf(items, 'bot_hours', ''))) {
-    return slotOf(items, 'outside_hours', '');
-  }
   if (/改期|退款|投訴|平少少|折扣|報價|排演/.test(t)) {
     return slotOf(items, 'staff', '呢單要人手跟。正式客服 96171444。');
   }
@@ -230,9 +227,34 @@ async function answer(text, from) {
   if (wantsAvailability(text) || AVAIL_RE.test(t)) {
     return lookupAvailability(text, items);
   }
-  if (/點去|地址|位置|where|address/.test(t)) return slotOf(items, 'address', '新蒲崗五芳街 23–25 號 The William 6 樓 C。https://roof70s.com/');
+  if (/點去|地址|位置|where|address/.test(t)) return slotOf(items, 'address', DEFAULT_ADDRESS);
   if (/幾點|營業|開門時間/.test(t)) return slotOf(items, 'hours', '大約 10:00–23:00。午夜至早上有貓頭鷹套餐。');
   return slotOf(items, 'fallback', '可以問租場價錢、今晚有冇位、兒童班、地址。打「staff」轉人手。');
+}
+async function answer(text, from) {
+  const items = await loadKb();
+  const t = (text || '').toLowerCase();
+  if (/staff/.test(t)) return slotOf(items, 'staff', '呢單要人手跟。正式客服 96171444。');
+  if (!inBotHours(slotOf(items, 'bot_hours', ''))) {
+    return slotOf(items, 'outside_hours', '');
+  }
+  if (aiEnabled(items)) {
+    const facts = [
+      '租場價\n' + slotOf(items, 'rental_price', RENTAL_PRICE),
+      '兒童班價\n' + slotOf(items, 'kids_price', KIDS_PRICE),
+      '地址\n' + slotOf(items, 'address', DEFAULT_ADDRESS),
+    ];
+    if (wantsAvailability(text) || AVAIL_RE.test(t) || isRentalTopic(text)) {
+      facts.push('檔期\n' + await lookupAvailability(text, items));
+    }
+    if (isLeaveTopic(text)) facts.push('請假\n' + slotOf(items, 'leave', LEAVE_REPLY));
+    if (isKidsTopic(text) && !PRICE_RE.test(t)) facts.push('新生表\n' + slotOf(items, 'kids_form', KIDS_FORM));
+    const faqBits = items.filter((i) => !i.slot && i.answer).slice(0, 20).map((i) => `${i.keywords}: ${i.answer}`).join('\n');
+    if (faqBits) facts.push('FAQ\n' + faqBits);
+    const out = await aiReply(text, facts.join('\n\n'));
+    if (out) return out;
+  }
+  return ruleAnswer(text, from, items);
 }
 export default async function handler(req, res) {
   if (req.method === 'GET') {
