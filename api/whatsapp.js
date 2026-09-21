@@ -6,6 +6,7 @@ const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
 const AVAIL_API = process.env.AVAILABILITY_API || 'https://roof70s.com/api/availability';
 const FAQ_API = process.env.FAQ_API || 'https://roof70s.com/api/whatsapp-faq';
 const GRAPH = `https://graph.facebook.com/v21.0/${PHONE_ID}/messages`;
+const AVAIL_RE = /檔期|档期|有冇位|有無位|有位嗎|有位嗎|有位|空檔|空房|空位|有冇房|有無房|有房嗎|有冇得租|有無得租|可唔可以租|租唔租到|得唔得租|今晚|聽日|听日|後日|available|free|room\s*a|a\s*\+\s*b/;
 
 const KIDS_FORM = ['Hello 家長你好！🥰','家長可以填寫返以下嘅資料先！😊','','小朋友姓名：','歲數：','性別：M / F','跳舞經驗：Yes / No','（如有可附上影片作參考）','家長聯絡電話（WhatsApp✅）：','*所有資料保密只作學校內部參考','','我哋會有專業嘅導師團隊為你睇返最適合小朋友歲數以及程度的課程！❤️','推薦返俺小朋友嚟試堂嫁！😊'].join('\n');
 const KIDS_AFTER_FORM = '收到，多謝家長！我哋同事會盡快覆返你。如要轉即時人手可打「staff」。';
@@ -50,7 +51,7 @@ function isKidsTopic(text) {
   return /兒童|小朋友|細路|孩子|kids|rookids|boom|街舞班|上堂|套票|幾歲|年齡|報名|試堂|家長/.test(text || '');
 }
 function isRentalTopic(text) {
-  return /租場|檔期|有冇位|有位|room\s*a|room\s*b|a\s*\+\s*b|\bab\b|貓頭鷹|鎖場|包場|\d{1,2}\s*[-/]\s*\d{1,2}/.test((text || '').toLowerCase());
+  return AVAIL_RE.test((text || '').toLowerCase()) || /租場|貓頭鷹|鎖場|包場|room\s*[ab]|\d{1,2}\s*[-/]\s*\d{1,2}/.test((text || '').toLowerCase());
 }
 async function replyText(to, body) {
   if (!TOKEN || !PHONE_ID) return;
@@ -127,7 +128,7 @@ function parseTimeRange(text) {
   return { start: fromMin(start), end: fromMin(end) };
 }
 function wantsAvailability(text) {
-  return /檔期|档期|有冇位|有位|空檔|今晚|聽日|听日|後日|available|free|room\s*a|a\s*\+\s*b/.test((text || '').toLowerCase());
+  return AVAIL_RE.test((text || '').toLowerCase());
 }
 function formatSlots(room, window) {
   let slots = room.slots || [];
@@ -183,7 +184,7 @@ async function answer(text) {
   if (/鎖場|幫我租|落單|hold位/.test(t) && !wantsAvailability(text)) {
     return '鎖場請上 https://roof70s.com/';
   }
-  if (wantsAvailability(text) || /有冇位|有位|檔期|room\s*a|a\s*\+\s*b/.test(t)) {
+  if (wantsAvailability(text) || AVAIL_RE.test(t)) {
     return lookupAvailability(text, items);
   }
   if (/幾錢|價錢|price|費用|幾貴|貓頭鷹|owl/.test(t)) {
