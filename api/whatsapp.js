@@ -7,10 +7,11 @@ const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
 const AVAIL_API = process.env.AVAILABILITY_API || 'https://roof70s.com/api/availability';
 const FAQ_API = process.env.FAQ_API || 'https://roof70s.com/api/whatsapp-faq';
 const GRAPH = `https://graph.facebook.com/v21.0/${PHONE_ID}/messages`;
-const AVAIL_RE = /檔期|档期|有冇位|有無位|有位嗎|有位|有冇場|有無場|有場|空檔|空房|空位|有冇房|有無房|有房嗎|有冇得租|有無得租|可唔可以租|租唔租到|得唔得租|租場|今晚|聽日|听日|後日|下星期|下週|下周|星期|available|free|room\s*a|a\s*\+\s*b/;
+const AVAIL_RE = /檔期|档期|有冇位|有無位|有位嗎|有位|有冇場|有無場|有場|空檔|空房|空位|有冇房|有無房|有房嗎|有冇得租|有無得租|可唔可以租|租唔租到|得唔得租|租場|今晚|聽日|听日|後日|available|free|room\s*a|a\s*\+\s*b/;
 const PRICE_RE = /幾錢|幾多錢|價錢|price|費用|幾貴|價目/;
 const pending = new Map();
 const sessions = globalThis.__waSess || (globalThis.__waSess = new Map());
+const seenIds = globalThis.__waSeen || (globalThis.__waSeen = new Map());
 const DOW = { '日': 0, '天': 0, sun: 0, '一': 1, mon: 1, '二': 2, tue: 2, '三': 3, wed: 3, '四': 4, thu: 4, '五': 5, fri: 5, '六': 6, sat: 6 };
 const CNH = { '零': 0, '一': 1, '二': 2, '兩': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10, '十一': 11, '十二': 12 };
 
@@ -22,6 +23,16 @@ const RENTAL_PRICE = ["Roof70's 租場（HKD／小時）",'A  非繁忙 280 · �
 const DEFAULT_ADDRESS = '新蒲崗五芳街 23–25 號 The William 6 樓 C。https://roof70s.com/';
 const BOOK_LINK = '鎖場請上 https://roof70s.com/ 落單（選日期同房間）。我哋唔能代鎖。';
 
+function seenBefore(id) {
+  if (!id) return false;
+  if (seenIds.has(id)) return true;
+  seenIds.set(id, Date.now());
+  if (seenIds.size > 400) {
+    const cut = Date.now() - 60 * 60 * 1000;
+    for (const [k, v] of seenIds) if (v < cut) seenIds.delete(k);
+  }
+  return false;
+}
 function getSess(from) {
   if (!from) return { topic: '', turns: [], at: Date.now() };
   let s = sessions.get(from);
@@ -31,7 +42,7 @@ function getSess(from) {
   return s;
 }
 function remember(sess, text) {
-  if (isLeaveTopic(text)) sess.topic = 'leave';
+  if (isLeaveTopic(text) || isHolidayTopic(text)) sess.topic = 'kids';
   else if (isKidsTopic(text) && !isRentalTopic(text) && !wantsAvailability(text)) sess.topic = 'kids';
   else if (isRentalTopic(text) || wantsAvailability(text) || /租場|場地|場租/.test(text || '')) sess.topic = 'rental';
 }
@@ -43,7 +54,10 @@ function wantsBook(text) {
   return /我想租|要租|鎖場|hold\s*位|落單|幫我租|咁我想租|想租/i.test(text || '');
 }
 function hasDateHint(text) {
-  return /今日|今晚|聽日|听日|後日|星期|週|周|\d{1,2}\s*[\/月.\-]\s*\d{1,2}|20\d{2}/.test(text || '');
+  return /今日|今晚|聽日|听日|後日|星期|禮拜|週|周|\d{1,2}\s*[\/月.\-]\s*\d{1,2}|20\d{2}/.test(text || '');
+}
+function isHolidayTopic(text) {
+  return /公眾假期|假期|返學|停課|有冇堂|使唔使返|上唔上堂/.test(text || '');
 }
 
 let kbCache = { at: 0, items: [] };
@@ -85,7 +99,8 @@ function isKidsTopic(text) {
   return /兒童|小朋友|細路|孩子|kids|rookids|boom|街舞班|上堂|套票|幾歲|年齡|報名|試堂|家長/.test(text || '');
 }
 function isRentalTopic(text) {
-  return AVAIL_RE.test((text || '').toLowerCase()) || /租場|貓頭鷹|鎖場|包場|場地|room\s*[ab]|\d{1,2}\s*[-/]\s*\d{1,2}/.test((text || '').toLowerCase());
+  if (isLeaveTopic(text) || isHolidayTopic(text)) return false;
+  return AVAIL_RE.test((text || '').toLowerCase()) || /租場|貓頭鷹|鎖場|包場|場地|room\s*[ab]/.test((text || '').toLowerCase());
 }
 function wantsKidsPrice(text) {
   return /兒童|課程|試堂|套票|rookids|kids|街舞班|堂費|班費/.test(text || '');
@@ -215,8 +230,8 @@ function parseTimeRange(text) {
 }
 function wantsAvailability(text) {
   const t = (text || '').toLowerCase();
-  if (wantsBook(text)) return false;
-  return AVAIL_RE.test(t) || /場|位/.test(t);
+  if (wantsBook(text) || isLeaveTopic(text) || isHolidayTopic(text)) return false;
+  return AVAIL_RE.test(t) || (/場|位/.test(t) && !/位置/.test(t));
 }
 function formatSlots(room, window) {
   let slots = room.slots || [];
@@ -243,8 +258,8 @@ async function lookupAvailability(text, items, sess) {
   let date = parseDate(text);
   if ((!date || !hasDateHint(text)) && sess?.lastDate) date = sess.lastDate;
   if (!date) date = hkToday();
-  let room = parseRoom(text) || sess?.lastRoom || '';
-  let window = parseTimeRange(text) || sess?.lastWindow || null;
+  const room = parseRoom(text) || sess?.lastRoom || '';
+  const window = parseTimeRange(text) || sess?.lastWindow || null;
   console.log('avail_parse', date, room || '-', window ? `${window.start}-${window.end}` : 'all');
   const qs = new URLSearchParams({ date });
   if (room) qs.set('room', room);
@@ -273,6 +288,9 @@ async function ruleAnswer(text, from, items, sess) {
     return slotOf(items, 'staff', '呢單要人手跟。正式客服 96171444。');
   }
   if (isLeaveTopic(text)) return matchFaq(text, 'kids', items) || slotOf(items, 'leave', LEAVE_REPLY);
+  if (isHolidayTopic(text)) {
+    return matchFaq(text, 'kids', items) || slotOf(items, 'holiday', '公眾假期點算堂要同事確認。請打 96171444 或「staff」。');
+  }
   if (looksLikeKidsForm(text)) return slotOf(items, 'kids_after_form', KIDS_AFTER_FORM);
   if (wantsBook(text)) {
     return sess?.lastAvail ? `${sess.lastAvail}\n\n${BOOK_LINK}` : BOOK_LINK;
@@ -320,14 +338,16 @@ async function answer(text, from) {
       '地址\n' + slotOf(items, 'address', DEFAULT_ADDRESS),
       sess.topic ? `當前題目：${sess.topic}` : '',
     ].filter(Boolean);
+    const needAvail = !isLeaveTopic(text) && !isHolidayTopic(text) && (wantsAvailability(text) || isRentalTopic(text) || (wantsBook(text) && sess.lastAvail));
     if (wantsBook(text) && sess.lastAvail) {
       facts.push('上一句檔期（不可推翻）\n' + sess.lastAvail);
       facts.push('客人要鎖場，叫佢上 https://roof70s.com/ ，唔好講冇位。');
-    } else if (sess.topic === 'rental' || wantsAvailability(text) || isRentalTopic(text) || /場|位|星期|晚/.test(t)) {
+    } else if (needAvail) {
       facts.push('檔期\n' + await lookupAvailability(text, items, sess));
     }
     if (isLeaveTopic(text)) facts.push('請假\n' + slotOf(items, 'leave', LEAVE_REPLY));
-    if (sess.topic === 'kids' && !PRICE_RE.test(t) && !wantsAvailability(text) && !wantsBook(text)) {
+    if (isHolidayTopic(text)) facts.push('假期\n' + slotOf(items, 'holiday', '公眾假期點算堂要同事確認，請打 96171444。'));
+    if (sess.topic === 'kids' && !PRICE_RE.test(t) && !wantsAvailability(text) && !wantsBook(text) && !isLeaveTopic(text) && !isHolidayTopic(text)) {
       facts.push('新生表\n' + slotOf(items, 'kids_form', KIDS_FORM));
     }
     const faqBits = items.filter((i) => !i.slot && i.answer).slice(0, 20).map((i) => `${i.keywords}: ${i.answer}`).join('\n');
@@ -354,10 +374,14 @@ export default async function handler(req, res) {
   }
   if (req.method !== 'POST') { res.status(405).end(); return; }
   try {
-    const messages = (req.body || {}).entry?.[0]?.changes?.[0]?.value?.messages || [];
-    console.log('incoming_count', messages.length);
+    const value = (req.body || {}).entry?.[0]?.changes?.[0]?.value || {};
+    const messages = value.messages || [];
+    console.log('incoming_count', messages.length, 'has_statuses', Boolean(value.statuses));
     for (const msg of messages) {
+      if (seenBefore(msg.id)) { console.log('skip_dup', msg.id); continue; }
       if (msg.type !== 'text' || !msg.text?.body || !msg.from) continue;
+      const age = msg.timestamp ? Date.now() / 1000 - Number(msg.timestamp) : 0;
+      if (age > 180) { console.log('skip_old', msg.id, Math.round(age)); continue; }
       await replyText(msg.from, await answer(msg.text.body, msg.from));
     }
   } catch (err) { console.error(err); }
