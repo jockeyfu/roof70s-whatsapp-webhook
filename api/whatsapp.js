@@ -58,10 +58,29 @@ function isRentalTopic(text) {
   return AVAIL_RE.test((text || '').toLowerCase()) || /租場|貓頭鷹|鎖場|包場|room\s*[ab]|\d{1,2}\s*[-/]\s*\d{1,2}/.test((text || '').toLowerCase());
 }
 function wantsKidsPrice(text) {
-  return /兒童|課程|試堂|套票|rookids|kids|街舞班/.test(text || '');
+  return /兒童|課程|試堂|套票|rookids|kids|街舞班|堂費|班費/.test(text || '');
+}
+function hkNowMin() {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Hong_Kong', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value || 0);
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value || 0);
+  return hour * 60 + minute;
+}
+function inBotHours(spec) {
+  const raw = String(spec || '').trim();
+  if (!raw) return true;
+  const now = hkNowMin();
+  return raw.split(/[,，]/).some((part) => {
+    const m = String(part).match(/(\d{1,2}):(\d{2})\s*[-~–至到]\s*(\d{1,2}):(\d{2})/);
+    if (!m) return false;
+    const a = Number(m[1]) * 60 + Number(m[2]);
+    const b = Number(m[3]) * 60 + Number(m[4]);
+    if (b > a) return now >= a && now < b;
+    return now >= a || now < b;
+  });
 }
 async function replyText(to, body) {
-  if (!TOKEN || !PHONE_ID) return;
+  if (!TOKEN || !PHONE_ID || !body) return;
   const res = await fetch(GRAPH, {
     method: 'POST',
     headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
@@ -178,19 +197,23 @@ async function lookupAvailability(text, items) {
 async function answer(text, from) {
   const items = await loadKb();
   const t = (text || '').toLowerCase();
-  if (/staff|改期|退款|投訴|平少少|折扣|報價|排演/.test(t)) {
+  if (/staff/.test(t)) return slotOf(items, 'staff', '呢單要人手跟。正式客服 96171444。');
+  if (!inBotHours(slotOf(items, 'bot_hours', ''))) {
+    return slotOf(items, 'outside_hours', '');
+  }
+  if (/改期|退款|投訴|平少少|折扣|報價|排演/.test(t)) {
     return slotOf(items, 'staff', '呢單要人手跟。正式客服 96171444。');
   }
   if (isLeaveTopic(text)) return matchFaq(text, 'kids', items) || slotOf(items, 'leave', LEAVE_REPLY);
   if (looksLikeKidsForm(text)) return slotOf(items, 'kids_after_form', KIDS_AFTER_FORM);
   if (from && pending.get(from) === 'price_kind') {
     pending.delete(from);
-    if (/租/.test(t) && !wantsKidsPrice(text)) return slotOf(items, 'rental_price', RENTAL_PRICE);
-    if (wantsKidsPrice(text) || /兒童|課程/.test(t)) return slotOf(items, 'kids_price', KIDS_PRICE);
+    if (/租|場地|場租/.test(t) && !wantsKidsPrice(text)) return slotOf(items, 'rental_price', RENTAL_PRICE);
+    if (wantsKidsPrice(text) || /兒童|課程|班/.test(t)) return slotOf(items, 'kids_price', KIDS_PRICE);
   }
   if (PRICE_RE.test(t) || /貓頭鷹|owl/.test(t)) {
     if (wantsKidsPrice(text)) return slotOf(items, 'kids_price', KIDS_PRICE);
-    if (isRentalTopic(text) || /貓頭鷹|owl|租場/.test(t)) return slotOf(items, 'rental_price', RENTAL_PRICE);
+    if (isRentalTopic(text) || /貓頭鷹|owl|租場|場地|場租/.test(t)) return slotOf(items, 'rental_price', RENTAL_PRICE);
     if (PRICE_RE.test(t)) {
       if (from) pending.set(from, 'price_kind');
       return slotOf(items, 'price_ask', '你係想查詢租場費用，定係兒童班課程價錢？請回覆「租場」或「兒童班」。');
