@@ -1,2 +1,3 @@
 # roof70s-whatsapp-webhook
-Roof70s WhatsApp Cloud API test webhook (do not connect live CS number)
+
+Test-only WhatsApp Cloud API webhook. Do not attach the live CS number 96171444.
