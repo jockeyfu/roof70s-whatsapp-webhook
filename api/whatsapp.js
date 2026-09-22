@@ -364,6 +364,21 @@ async function answer(text, from) {
   pushTurn(sess, 'assistant', reply);
   return reply;
 }
+function handleSmbMessageEchoes(value) {
+  const echoes = Array.isArray(value?.smb_message_echoes) ? value.smb_message_echoes : [];
+  for (const echo of echoes) {
+    if (!echo?.id) continue;
+    console.log('smb_message_echo', JSON.stringify({
+      id: echo.id,
+      from: echo.from || '',
+      to: echo.to || '',
+      type: echo.type || '',
+      timestamp: echo.timestamp || '',
+    }));
+  }
+  return echoes.length;
+}
+
 export default async function handler(req, res) {
   if (req.method === 'GET') {
     const mode = req.query['hub.mode'];
@@ -375,8 +390,9 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') { res.status(405).end(); return; }
   try {
     const value = (req.body || {}).entry?.[0]?.changes?.[0]?.value || {};
+    const echoCount = handleSmbMessageEchoes(value);
     const messages = value.messages || [];
-    console.log('incoming_count', messages.length, 'has_statuses', Boolean(value.statuses));
+    console.log('incoming_count', messages.length, 'smb_echo_count', echoCount, 'has_statuses', Boolean(value.statuses));
     for (const msg of messages) {
       if (seenBefore(msg.id)) { console.log('skip_dup', msg.id); continue; }
       if (msg.type !== 'text' || !msg.text?.body || !msg.from) continue;
