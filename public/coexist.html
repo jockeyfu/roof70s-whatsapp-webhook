@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Roof70s WhatsApp 共存連接</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #222; }
+    button { background: #1877f2; color: #fff; border: 0; border-radius: 8px; padding: 12px 20px; font-weight: 700; cursor: pointer; }
+    pre { background: #111; color: #9f9; padding: 12px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; min-height: 80px; }
+    .warn { background: #fff6e5; padding: 12px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Roof70s WhatsApp 共存</h1>
+  <p class="warn">只接受 <b>連接 WhatsApp Business 應用程式 / 共存</b>。見到「遷移 / 手機將無法使用」請取消。</p>
+  <p>用部手機開好 <b>WhatsApp Business</b>（96171444），然後在電腦點下面按鈕。</p>
+  <button type="button" id="go">連接 WhatsApp 共存模式</button>
+  <h3>結果</h3>
+  <pre id="out">等待…</pre>
+  <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
+  <script>
+    const APP_ID = '28239445439061491';
+    const CONFIG_ID = '1625827739172183';
+    const out = document.getElementById('out');
+    function log(x) {
+      out.textContent = typeof x === 'string' ? x : JSON.stringify(x, null, 2);
+      console.log(x);
+    }
+    window.fbAsyncInit = function () {
+      FB.init({ appId: APP_ID, autoLogAppEvents: true, xfbml: true, version: 'v21.0' });
+      log('SDK 就緒。可以點按鈕。');
+    };
+    window.addEventListener('message', (event) => {
+      if (!String(event.origin || '').endsWith('facebook.com') && !String(event.origin || '').endsWith('instagram.com')) return;
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'WA_EMBEDDED_SIGNUP') log(data);
+      } catch (e) {}
+    });
+    function fbLoginCallback(response) {
+      log(response || { error: 'no response' });
+    }
+    document.getElementById('go').onclick = function () {
+      if (!window.FB) { log('等 SDK 載完再試'); return; }
+      FB.login(fbLoginCallback, {
+        config_id: CONFIG_ID,
+        response_type: 'code',
+        override_default_response_type: true,
+        extras: {
+          setup: {},
+          featureType: 'whatsapp_business_app_onboarding',
+          sessionInfoVersion: '3',
+          version: 'v3'
+        }
+      });
+    };
+  </script>
+</body>
+</html>
