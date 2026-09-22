@@ -36,7 +36,7 @@ function seenBefore(id) {
 function getSess(from) {
   if (!from) return { topic: '', turns: [], at: Date.now() };
   let s = sessions.get(from);
-  if (!s || Date.now() - s.at > 45 * 60 * 1000) s = { topic: '', turns: [], lastAvail: '', lastDate: '', at: Date.now() };
+  if (!s || Date.now() - s.at > 45 * 60 * 1000) s = { topic: '', turns: [], lastAvail: '', lastDate: '', at: Date.now(), handoff: false };
   s.at = Date.now();
   sessions.set(from, s);
   return s;
@@ -327,7 +327,24 @@ async function answer(text, from) {
   const t = (text || '').toLowerCase();
   const sess = getSess(from);
   remember(sess, text);
-  if (/staff/.test(t)) return slotOf(items, 'staff', '呢單要人手跟。正式客服 96171444。');
+
+  if (/^\s*\/ai\s*$/i.test(text || '')) {
+    sess.handoff = false;
+    pushTurn(sess, 'system', 'AI resumed');
+    return '已恢復 AI 自動回覆。';
+  }
+
+  if (/真人客服|人工客服|客服人員|^\s*staff\s*$/i.test(text || '')) {
+    sess.handoff = true;
+    pushTurn(sess, 'system', 'Human handoff requested');
+    return slotOf(items, 'staff', '已轉交真人客服，同事會盡快回覆。正式客服 96171444。');
+  }
+
+  if (sess.handoff) {
+    console.log('human_handoff_active', from);
+    return '';
+  }
+
   if (!inBotHours(slotOf(items, 'bot_hours', ''))) {
     return slotOf(items, 'outside_hours', '');
   }
@@ -398,7 +415,8 @@ export default async function handler(req, res) {
       if (msg.type !== 'text' || !msg.text?.body || !msg.from) continue;
       const age = msg.timestamp ? Date.now() / 1000 - Number(msg.timestamp) : 0;
       if (age > 180) { console.log('skip_old', msg.id, Math.round(age)); continue; }
-      await replyText(msg.from, await answer(msg.text.body, msg.from));
+      const reply = await answer(msg.text.body, msg.from);
+      if (reply) await replyText(msg.from, reply);
     }
   } catch (err) { console.error(err); }
   res.status(200).json({ ok: true });
